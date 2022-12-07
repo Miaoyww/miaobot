@@ -1,15 +1,12 @@
+import os
 import re
 import time
 from decimal import Decimal
-from io import BytesIO
 from pathlib import Path
-
 import requests
 import json
-from PIL import Image, ImageFont, ImageDraw
 from urllib import request
 from nonebot import on_command, logger
-from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 from nonebot.adapters.onebot.v11 import *
 
@@ -60,6 +57,7 @@ async def _handle(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg(
         "cover_url": response_body["pic"],
         "upload_time": time.strftime("%Y/%m/%d %H:%M", time.localtime(response_body["pubdate"])),
         "duration": f"{response_body['duration'] // 60}:{response_body['duration'] - response_body['duration'] // 60 * 60}",
+        "desc": f"{response_body['desc']}",
         "view": response_body["stat"]["view"],
         "danmu": response_body["stat"]["danmaku"],
         "like": response_body["stat"]["like"],
@@ -70,44 +68,29 @@ async def _handle(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg(
         "owner_face": f"{response_body['owner']['face']}"
     }
     save_path = Path(__file__).parent / "img.png"
-    image = Image.new("RGB", (530, 620), (245, 243, 243))
-    image.paste((220, 220, 220), (0, 480, 530, 620))
-    cover = Image.open(BytesIO(
-        requests.get(video_info["cover_url"], headers=headers).content)).resize((464, 290), Image.ANTIALIAS)
-    cover_size = (34, 34, 34 + cover.width, 34 + cover.height)
-    image.paste(cover, cover_size)
-
-    face = Image.open(BytesIO(
-        requests.get(video_info["owner_face"], headers=headers).content)).resize((80, 80), Image.ANTIALIAS)
-    face_size = (34, 510, 34 + face.width, 510 + face.height)
-    face_draw = ImageDraw.Draw(image)
-    face_draw.text((face.width + 50, face_size[1] + 10), f"{video_info['owner']}\n{video_info['upload_time']} 上传",
-                   fill=(20, 20, 20),
-                   font=ImageFont.truetype(str(Path(__file__).parent / "fonts/SourceHanSansSC-Heavy-2.otf"), 21))
-    image.paste(face, face_size)
-
-    cover_draw = ImageDraw.Draw(image)
-    least_text = video_info["title"]
-    if len(video_info["title"]) >= 12:
-        least_text = "\n".join(re.findall('.{12}', video_info['title']))
-        if len(least_text) < len(video_info["title"]):
-            least_text += f"..."
-    detail_text = f"\n" \
-                  f"{Decimal(video_info['view'] / 10000).quantize(Decimal('0.0')) if video_info['view'] > 10000 else video_info['view']}" \
-                  f"{'w' if video_info['view'] > 10000 else ''}次观看·" \
-                  f"{Decimal(video_info['like'] / 10000).quantize(Decimal('0')) if video_info['like'] > 10000 else video_info['like']}" \
-                  f"{'w' if video_info['like'] > 10000 else ''}点赞·" \
-                  f"{Decimal(video_info['coin'] / 10000).quantize(Decimal('0')) if video_info['coin'] > 10000 else video_info['coin']}" \
-                  f"{'w' if video_info['coin'] > 10000 else ''}硬币·" \
-                  f"{Decimal(video_info['favorite'] / 10000).quantize(Decimal('0')) if video_info['favorite'] > 10000 else video_info['favorite']}" \
-                  f"{'w' if video_info['favorite'] > 10000 else ''}收藏"
-    cover_draw.text((cover_size[0], cover_size[3]), least_text, fill=(20, 20, 20),
-                    font=ImageFont.truetype(str(Path(__file__).parent / "fonts/SourceHanSansSC-Heavy-2.otf"), 30))
-    cover_draw.text((cover_size[0], 410), detail_text, fill=(50, 50, 50),
-                    font=ImageFont.truetype(str(Path(__file__).parent / "fonts/SourceHanSansSC-Heavy-2.otf"), 21))
-    image.save(save_path)
+    os.remove(save_path) if os.path.exists(save_path) else None
+    with open(save_path, 'wb') as w:
+        w.write(requests.get(video_info["cover_url"], headers=headers).content)
     logger.debug("图像准备完成, 准备发送")
-    send_image = MessageSegment.image(save_path)
-    logger.debug("send_image OK")
+
+    if len(video_info['desc'].split("\n")) > 5:
+        if len(video_info['desc'].split("\n")) > 5:
+            logger.debug("简介过长, 准备取前5行")
+            video_info["desc"] = "\n".join(video_info["desc"].split("\n")[:5])
+            video_info["desc"] += "...\n  (由于简介过长, 已截取前5行)"
+    detail_text = f"{Decimal(video_info['view'] / 10000).quantize(Decimal('0.0')) if video_info['view'] > 10000 else video_info['view']}" \
+                  f"{'w' if video_info['view'] > 10000 else ''}次观看 · " \
+                  f"{Decimal(video_info['like'] / 10000).quantize(Decimal('0.0')) if video_info['like'] > 10000 else video_info['like']}" \
+                  f"{'w' if video_info['like'] > 10000 else ''}点赞 · " \
+                  f"{Decimal(video_info['coin'] / 10000).quantize(Decimal('0.0')) if video_info['coin'] > 10000 else video_info['coin']}" \
+                  f"{'w' if video_info['coin'] > 10000 else ''}硬币 · " \
+                  f"{Decimal(video_info['favorite'] / 10000).quantize(Decimal('0.0')) if video_info['favorite'] > 10000 else video_info['favorite']}" \
+                  f"{'w' if video_info['favorite'] > 10000 else ''}收藏"
+    text = f"————标题———— \n{video_info['title']}\n" \
+           f"————UP主———— \n{video_info['owner']} ({video_info['upload_time']}上传 -时长: {video_info['duration']})\n" \
+           f"————信息———— \n{detail_text}\n" \
+           f"————简介———— \n{video_info['desc']}" if video_info['desc'] != "" else None
+    image_message = MessageSegment.image(save_path)
+    text_message = MessageSegment.text(text)
     buffer[f"{bvid}"] = time.time()
-    await bvf.finish(send_image)
+    await bot.send(event=event, message=(image_message + text_message))
