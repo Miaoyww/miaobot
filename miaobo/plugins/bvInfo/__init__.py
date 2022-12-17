@@ -9,10 +9,30 @@ from urllib import request
 from nonebot import on_command, logger
 from nonebot.params import CommandArg
 from nonebot.adapters.onebot.v11 import *
+from nonebot.plugin import PluginMetadata
 
 bvf = on_command("bvf", aliases={"bvinfo"})
-buffer = {
-}
+
+__plugin_meta__ = PluginMetadata(
+    name='Bilibili Video Info',
+    description='获取Bilibili视频的详情信息',
+    usage='''使用方法: .bvf <Bvid>|<Aid>'''
+)
+
+
+def bv2av(x):
+    table = 'fZodR9XQDSUm21yCkr6zBqiveYah8bt4xsWpHnJE7jL5VG3guMTKNPAwcF'  # 码表
+    tr = {}  # 反查码表
+    # 初始化反查码表
+    for i in range(58):
+        tr[table[i]] = i
+    s = [11, 10, 3, 8, 4, 6]  # 位置编码表
+    XOR = 177451812  # 固定异或值
+    ADD = 8728348608  # 固定加法值
+    r = 0
+    for i in range(6):
+        r += tr[x[s[i]]] * 58 ** i
+    return (r - ADD) ^ XOR
 
 
 @bvf.handle()
@@ -27,26 +47,20 @@ async def _handle(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg(
     matched_b23tv = re.findall("(?<=b23.tv/)\w*", input_arg)
     if len(matched_b23tv) == 1:
         input_arg = request.urlopen(f"https://b23.tv/{matched_b23tv[0]}").geturl()
-    matched_bvid = re.findall("(?<=BV)\w*", input_arg)
-    bvid: str
-    if len(matched_bvid) == 1:
-        bvid = f"BV{matched_bvid[0]}"
-        logger.info(f"得到bvid: {bvid}")
-    else:
-        await bot.send_group_msg(group_id=event.group_id, message=f"[CQ:at,qq={event.user_id}] 你输入的内容有误",
-                                 auto_escape=False)
+    matched_acode = re.search("av(\d{1,12})|BV(1[A-Za-z0-9]{2}4.1.7[A-Za-z0-9]{2})", input_arg)
+    if matched_acode is None:
         return
-    logger.debug(buffer)
-    if bvid in buffer:
-        if time.time() - buffer[bvid] < 20:
-            logger.debug(f"{bvid}的请求被拒绝，短时间内请求过量")
-            return
-        else:
-            buffer.pop(bvid)
+
+    if matched_acode[0][0:2] == "BV":
+        aid = bv2av(matched_acode[0])
+    else:
+        aid = matched_acode[0].replace("av", "")
+
+    logger.info(f"得到aid: {aid}")
     response_body: dict
     try:
         response_body = json.loads(
-            requests.get(f"http://api.bilibili.com/x/web-interface/view?bvid={bvid}", headers=headers).content.decode(
+            requests.get(f"http://api.bilibili.com/x/web-interface/view?aid={aid}", headers=headers).content.decode(
                 encoding="UTF-8"))["data"]
     except KeyError:
         await bot.send_group_msg(group_id=event.group_id, message=f"[CQ:at,qq={event.user_id}] 你输入的视频不存在",
@@ -54,6 +68,7 @@ async def _handle(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg(
         return
     video_info = {
         "title": response_body["title"],
+        "bvid": response_body["bvid"],
         "cover_url": response_body["pic"],
         "upload_time": time.strftime("%Y/%m/%d %H:%M", time.localtime(response_body["pubdate"])),
         "duration": f"{response_body['duration'] // 60}:{response_body['duration'] - response_body['duration'] // 60 * 60}",
@@ -67,10 +82,7 @@ async def _handle(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg(
         "owner": f"{response_body['owner']['name']}",
         "owner_face": f"{response_body['owner']['face']}"
     }
-    save_path = Path(__file__).parent / "img.png"
-    os.remove(save_path) if os.path.exists(save_path) else None
-    with open(save_path, 'wb') as w:
-        w.write(requests.get(video_info["cover_url"], headers=headers).content)
+    img_data = requests.get(video_info["cover_url"], headers=headers).content
     logger.debug("图像准备完成, 准备发送")
 
     if len(video_info['desc'].split("\n")) > 5:
@@ -86,11 +98,12 @@ async def _handle(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg(
                   f"{'w' if video_info['coin'] > 10000 else ''}硬币 · " \
                   f"{Decimal(video_info['favorite'] / 10000).quantize(Decimal('0.0')) if video_info['favorite'] > 10000 else video_info['favorite']}" \
                   f"{'w' if video_info['favorite'] > 10000 else ''}收藏"
-    text = f"————标题———— \n{video_info['title']}\n" \
+    text = f"https://www.bilibili.com/video/{video_info['bvid']}\n" \
+           f"————标题———— \n{video_info['title']}\n" \
            f"————UP主———— \n{video_info['owner']} ({video_info['upload_time']}上传 -时长: {video_info['duration']})\n" \
            f"————信息———— \n{detail_text}\n" \
            f"————简介———— \n{video_info['desc']}" if video_info['desc'] != "" else None
-    image_message = MessageSegment.image(save_path)
+
+    image_message = MessageSegment.image(img_data)
     text_message = MessageSegment.text(text)
-    buffer[f"{bvid}"] = time.time()
     await bot.send(event=event, message=(image_message + text_message))

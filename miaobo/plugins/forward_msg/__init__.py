@@ -1,9 +1,14 @@
-from nonebot import on_command, logger
-from nonebot.matcher import Matcher
-from nonebot.params import CommandArg
+from nonebot import on_command
 from nonebot.adapters.onebot.v11 import *
+from nonebot.plugin import PluginMetadata
 
 formsg = on_command("formsg")
+
+__plugin_meta__ = PluginMetadata(
+    name='转发来源',
+    description='获取转发消息的详情信息, 如聊天记录内出现的人的QQ号, 群号',
+    usage='''使用方法: 回复聊天记录, 使用.formsg指令(只需要指令)'''
+)
 
 
 @formsg.handle()

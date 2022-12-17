@@ -1,16 +1,18 @@
 import asyncio
-
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, GROUP, Message, MessageSegment
-from nonebot.plugin import on_command
+from nonebot.adapters.onebot.v11 import GroupMessageEvent, GROUP, MessageSegment
+from nonebot.plugin import on_command, PluginMetadata
 from nonebot.params import CommandArg
+from nonebot.adapters.onebot.v11 import *
 from typing import List
 import time
 
-buffer = {
-
-}
-
 jrrp = on_command("jrrp", permission=GROUP, priority=50)
+
+__plugin_meta__ = PluginMetadata(
+    name='今日人品',
+    description='每日人品',
+    usage='''使用方法: .jrrp'''
+)
 message: List[dict] = [
     {
         "expr": "jrrp == 100",
@@ -57,18 +59,10 @@ message: List[dict] = [
 
 
 @jrrp.handle()
-async def _h(event: GroupMessageEvent):
+async def _h(event: GroupMessageEvent, args: Message = CommandArg()):
+    if args.extract_plain_text() != "":
+        return
     qid = event.user_id
-    if qid not in buffer:
-        buffer[qid] = time.time()
-    else:
-        if time.time() - buffer[qid] < 3600:
-            await asyncio.sleep(1)
-            reply = MessageSegment.at(qid) + MessageSegment.text("恁缓一缓吧")
-            await jrrp.send(reply)
-            return
-        else:
-            buffer[qid] = time.time()
     session = event.get_session_id()
     id = session.split('_')[2]
     jrrp_num = get_jrrp(str(id))
