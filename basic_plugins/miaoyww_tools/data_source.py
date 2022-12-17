@@ -1,6 +1,7 @@
 from pathlib import Path
 from nonebot import logger
 from nonebot.internal.matcher import Matcher
+from configs.config import config
 import os
 import shutil
 import requests

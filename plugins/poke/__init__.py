@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from nonebot import on_notice, logger
 from nonebot.adapters.onebot.v11 import PokeNotifyEvent, MessageSegment
-from miaobo.basic_plugins.config import Config
+from configs.config import config
 import random
 import os
 
@@ -28,7 +28,7 @@ __plugin_settings__ = {
     "cmd": ["戳一戳"],
 }
 
-poke__reply = json.load(open(Config.text_path / "poke" / "reply.json", encoding="utf-8"))["replies"]
+poke__reply = json.load(open(config.text_path / "poke" / "reply.json", encoding="utf-8"))["replies"]
 
 
 class CountLimiter:
@@ -65,9 +65,9 @@ def record(voice_name: str, path: str = None) -> MessageSegment or str:
     if len(voice_name.split(".")) == 1:
         voice_name += ".mp3"
     file = (
-        Path(Config.record_path) / path / voice_name
+        Path(config.record_path) / path / voice_name
         if path
-        else Path(Config.record_path) / voice_name
+        else Path(config.record_path) / voice_name
     )
     if "http" in voice_name:
         return MessageSegment.record(voice_name)
@@ -102,7 +102,7 @@ async def _poke_event(event: PokeNotifyEvent):
             await poke_.finish(rst + random.choice(poke__reply), at_sender=True)
         rand = random.random()
         if 0.4 < rand < 0.8:
-            voice = random.choice(os.listdir(Config.record_path / "dinggong"))
+            voice = random.choice(os.listdir(config.record_path / "dinggong"))
             result = record(voice, "dinggong")
             await poke_.send(result)
             await poke_.send(voice.split("_")[1])

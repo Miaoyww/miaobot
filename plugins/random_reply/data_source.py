@@ -2,13 +2,13 @@ import difflib
 import json
 import os
 import random
-from miaobo.basic_plugins.config import Config
+from configs.config import config
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageSegment, Message
 
-replies = json.load(open(Config.TEXT_PATH / "reply" / "reply.json", "r", encoding='utf-8'))
-voice_lst = os.listdir(Config.RECORD_PATH / "dingzhen")
-
+replies = json.load(open(config.text_path / "reply" / "reply.json", "r", encoding='utf-8'))
+voice_lst = os.listdir(config.record_path / "dingzhen")
+dinggong_lst = os.listdir(config.record_path / "dinggong")
 
 async def record(voice_name: str, path: str = None) -> MessageSegment | None:
     """
@@ -20,7 +20,7 @@ async def record(voice_name: str, path: str = None) -> MessageSegment | None:
     """
     if len(voice_name.split(".")) == 1:
         voice_name += ".mp3"
-    file = Config.RECORD_PATH / path / voice_name
+    file = config.record_path / path / voice_name
     if file.exists():
         result = MessageSegment.record(f"file:///{file.absolute()}")
         return result
@@ -37,24 +37,22 @@ async def get_reply_result(text: str) -> Message | MessageSegment | None:
 
 
 async def get_special_reply_result(text: str) -> Message | MessageSegment | None:
-    rand = random.random()
-    if 0.3 < rand < 0.9:
-        if len(text.replace(" ", "")) == 0:
-            rand_choice = random.choice(replies[" "])
-            if type(rand_choice) is list:
-                rand_choice = random.choice(rand_choice)
-                if type(rand_choice) is dict:
-                    rply_text = MessageSegment.text(rand_choice["text"])
-                    rply_song = record(rand_choice["path"], "songs")
-                    return rply_text + await rply_song
-                else:
-                    return MessageSegment.text(rand_choice)
+    if 0.3 < random.random() < 0.9:
+        rand_choice = random.choice(replies[" "]) if len(text.replace(" ", "")) == 0 else None
+        if type(rand_choice) is list:
+            rand_choice = random.choice(rand_choice)
+            if type(rand_choice) is dict:
+                rply_text = MessageSegment.text(rand_choice["text"])
+                rply_song = record(rand_choice["path"], "songs")
+                return rply_text + await rply_song
             else:
                 return MessageSegment.text(rand_choice)
-
+    if "骂我" or "骂老子" in text:
+        rand_choice = random.choice(dinggong_lst)
+        text = rand_choice.split("_")[1].split(".")[0]
+        return (await record(rand_choice, "dinggong")) + MessageSegment.text(text)
     if f"{text}.mp3" not in voice_lst:
-        rand = random.random()
-        if 0.3 < rand < 0.9:
+        if 0.3 < random.random() < 0.9:
             matches = await get_close_matches(text, voice_lst)
             return await record(random.choice(matches), "dingzhen") if len(matches) >= 1 else None
     else:

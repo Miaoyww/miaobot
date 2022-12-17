@@ -18,6 +18,7 @@ update = on_command("upd", aliases={"更新", "update"}, permission=SUPERUSER)
 
 @update.handle()
 async def _(matcher: Matcher):
-    await entry_update_plugins(matcher)
-
+    # 由于文件目录的调整, 直接更新会导致机器人损坏
+    # await entry_update_plugins(matcher)
+    await matcher.send("更新插件维护中")
 

@@ -1,19 +1,10 @@
 import asyncio
-import json
-from pathlib import Path
-import random
-from httpx import *
-from nonebot import on_message, logger, on_command
+from nonebot import on_message
 from nonebot.plugin import PluginMetadata
 from nonebot.adapters.onebot.v11 import *
-from nonebot import on_command, require
 from nonebot.adapters.onebot.v11 import (
-    GroupMessageEvent,
-    Message,
     MessageEvent,
-    MessageSegment,
 )
-from nonebot.log import logger
 from nonebot.rule import to_me
 from .data_source import *
 
@@ -33,7 +24,7 @@ async def _(evt: MessageEvent):
     user_id = evt.sender.user_id
     result = await get_reply_result(text)
     if result is not None:
-        await asyncio.sleep(random.randint(10, 20) / 10)
+        await asyncio.sleep(random.randint(5, 10) / 10)
         logger.info(f"USER {user_id}|{nickname} 发送了 {text} 其回复是 {result} ")
         if type(result) is Message:
             for item in result:
