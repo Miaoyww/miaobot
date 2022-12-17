@@ -1,15 +1,13 @@
 import difflib
 import json
 import os
-from pathlib import Path
 import random
-from typing import Any
-
+from miaobo.basic_plugins.config import Config
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageSegment, Message
 
-replies = json.load(open(f"{Path(__file__).parent}/res/reply.json", "r", encoding='utf-8'))
-voice_lst = os.listdir(f"{Path(__file__).parent}/res/dingzhen")
+replies = json.load(open(Config.TEXT_PATH / "reply" / "reply.json", "r", encoding='utf-8'))
+voice_lst = os.listdir(Config.RECORD_PATH / "dingzhen")
 
 
 async def record(voice_name: str, path: str = None) -> MessageSegment | None:
@@ -22,7 +20,7 @@ async def record(voice_name: str, path: str = None) -> MessageSegment | None:
     """
     if len(voice_name.split(".")) == 1:
         voice_name += ".mp3"
-    file = (Path(__file__).parent / "res" / path / voice_name)
+    file = Config.RECORD_PATH / path / voice_name
     if file.exists():
         result = MessageSegment.record(f"file:///{file.absolute()}")
         return result
@@ -53,12 +51,14 @@ async def get_special_reply_result(text: str) -> Message | MessageSegment | None
                     return MessageSegment.text(rand_choice)
             else:
                 return MessageSegment.text(rand_choice)
-    else:
-        if f"{text}.mp3" not in voice_lst:
+
+    if f"{text}.mp3" not in voice_lst:
+        rand = random.random()
+        if 0.3 < rand < 0.9:
             matches = await get_close_matches(text, voice_lst)
             return await record(random.choice(matches), "dingzhen") if len(matches) >= 1 else None
-        else:
-            return await record(text, "dingzhen")
+    else:
+        return await record(text, "dingzhen")
 
 
 async def get_close_matches(arg: str, lst: list) -> list:
