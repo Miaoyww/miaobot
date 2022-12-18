@@ -9,13 +9,13 @@ from httpx import AsyncClient
 from nonebot.log import logger
 from pytz import timezone
 
-from configs.config import config
+from configs.path_config import *
 
 try:
     from nonebot.adapters.onebot.v11 import Message, MessageSegment  # type: ignore
 except ImportError:
     from nonebot.adapters.cqhttp import Message, MessageSegment  # type: ignore
-cache = config.data_path / "epicfree" / "status.json"
+cache = DATA_PATH / "epicfree" / "status.json"
 
 
 # 写入与读取订阅信息

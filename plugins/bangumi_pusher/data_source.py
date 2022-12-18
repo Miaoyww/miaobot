@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 from json import JSONDecodeError
 
-from configs.config import config
+from configs.path_config import *
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from httpx import AsyncClient, Response
 from pydantic import BaseModel
@@ -87,7 +87,7 @@ class BangumiManager:
     def __init__(self):
         self.bangumi_list: List[Bangumi] = []
         self.group_list: List[int] = []
-        self.file_path = config.data_path / "bangumi_sub.json"
+        self.file_path = DATA_PATH / "bangumi_sub.json"
         self.read()
 
     def auto_save(func):

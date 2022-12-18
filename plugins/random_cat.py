@@ -9,7 +9,6 @@ from nonebot.params import CommandArg
 from nonebot.plugin import PluginMetadata
 
 cat = on_command("cat", aliases={"jrcat", "今日猫猫", "猫猫"}, block=True, priority=5)
-http_cat = on_command("http_cat", aliases={"hcat"}, block=True)
 
 __plugin_meta__ = PluginMetadata(
     name='每日猫猫',
@@ -18,7 +17,7 @@ __plugin_meta__ = PluginMetadata(
 )
 
 
-@http_cat.handle()
+@cat.handle()
 async def _(bot: Bot, ev: Event, arg: Message = CommandArg()):
     if (code := arg.extract_plain_text()).isdigit():
         async with httpx.AsyncClient() as client:
@@ -27,10 +26,7 @@ async def _(bot: Bot, ev: Event, arg: Message = CommandArg()):
             }
             img = await client.get(f"https://http.cat/{code}", headers=headers)
             await bot.send(event=ev, message=MessageSegment.image(img.content))
-
-
-@cat.handle()
-async def _(bot: Bot, ev: Event):
+            return
     times = 0
     while True:
         try:

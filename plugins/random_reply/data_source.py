@@ -2,13 +2,14 @@ import difflib
 import json
 import os
 import random
-from configs.config import config
+from configs.path_config import *
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import MessageSegment, Message
 
-replies = json.load(open(config.text_path / "reply" / "reply.json", "r", encoding='utf-8'))
-voice_lst = os.listdir(config.record_path / "dingzhen")
-dinggong_lst = os.listdir(config.record_path / "dinggong")
+replies = json.load(open(TEXT_PATH / "reply" / "reply.json", "r", encoding='utf-8'))
+voice_lst = os.listdir(RECORD_PATH / "dingzhen")
+dinggong_lst = os.listdir(RECORD_PATH / "dinggong")
+
 
 async def record(voice_name: str, path: str = None) -> MessageSegment | None:
     """
@@ -20,7 +21,7 @@ async def record(voice_name: str, path: str = None) -> MessageSegment | None:
     """
     if len(voice_name.split(".")) == 1:
         voice_name += ".mp3"
-    file = config.record_path / path / voice_name
+    file = RECORD_PATH / path / voice_name
     if file.exists():
         result = MessageSegment.record(f"file:///{file.absolute()}")
         return result
