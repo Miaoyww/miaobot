@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass
 from json import JSONDecodeError
 
@@ -178,7 +179,9 @@ class BangumiManager:
                 "sub_groups": [],
                 "subs": {}
             }
-            json.dump(result, open(self.file_path, "r+", encoding="utf-8"), sort_keys=True, indent=4,
+            if not os.path.exists(self.file_path):
+                os.mkdir(self.file_path.parent)
+            json.dump(result, open(self.file_path, "x", encoding="utf-8"), sort_keys=True, indent=4,
                       separators=(',', ':'),
                       ensure_ascii=False)
         try:
