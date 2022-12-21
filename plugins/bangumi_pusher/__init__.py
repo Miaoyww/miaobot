@@ -51,22 +51,22 @@ async def _(evt: MessageEvent, state: T_State, args: Message = CommandArg()):
 @add_sub.got("sub_user")
 @add_sub.got("id")
 async def _(id_: str = ArgStr("id"), sub_user: str = ArgStr("sub_user")):
-    bangumi_obj = await get_bangumi_obj(id_)
-    if bangumi_obj.status_code == 200:
-        await add_sub.finish(await add_bangumi_sub(bangumi_obj))
+    season_obj = await get_season_obj(id_)
+    if season_obj.status == 200:
+        await add_sub.finish(await add_season_sub(season_obj))
     else:
         await add_sub.finish(MessageSegment.at(sub_user) + MessageSegment.text("您输入的mid有误"))
 
 
 @lst_sub.handle()
 async def _(evt: MessageEvent, args: Message = CommandArg()):
-    await lst_sub.finish(await get_bangumi_lst())
+    await lst_sub.finish(await get_season_lst())
 
 
 @del_sub.handle()
 async def _(evt: MessageEvent, args: Message = CommandArg()):
     index = args.extract_plain_text()
     if index.isdigit():
-        await lst_sub.finish(await del_bangumi_sub(int(index)))
+        await lst_sub.finish(await del_season_sub(int(index)))
     else:
         await lst_sub.finish(MessageSegment.at(evt.user_id) + MessageSegment.text("错误的索引值, 要求是正整数"))

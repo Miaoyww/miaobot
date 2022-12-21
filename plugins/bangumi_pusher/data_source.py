@@ -2,21 +2,19 @@ import json
 import os
 from dataclasses import dataclass
 from json import JSONDecodeError
-
 from configs.path_config import *
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
-from httpx import AsyncClient, Response
+import aiohttp
 from pydantic import BaseModel
 from nonebot import require, logger, get_bot
 from typing import List
 import requests
-import shutil
 
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 
 
-class BangumiHttp(BaseModel):
+class SeasonHttp(BaseModel):
     title: str = ""  # 标题
     media_id: int = 0  # mid
     index_show: str = ""  # 索引右方, 比如更新到第几集, 总共几集
@@ -30,9 +28,9 @@ class BangumiHttp(BaseModel):
 
 
 @dataclass()
-class Bangumi:
+class Season:
     title: str = ""
-    media_id: int = 0
+    media_id: str = ""
     now_ep: int = 0
     now_ep_id: int = 0
     now_ep_show: str = ""
@@ -40,13 +38,13 @@ class Bangumi:
     cover: str = ""
     share_url: str = ""
 
-    def __init__(self, input_: dict | Response, media_id: int = 0):
+    def __init__(self, input_: dict | aiohttp.ClientResponse, media_id: str = ""):
         if type(input_) is dict:
             self.read_from_file(input_, media_id)
         else:
             self.read_from_response(input_)
 
-    def read_from_file(self, read_body: dict, media_id: int):
+    def read_from_file(self, read_body: dict, media_id: str):
 
         self.title = read_body["title"]
         self.media_id = media_id
@@ -57,19 +55,19 @@ class Bangumi:
         self.share_url = read_body["share_url"]
         self.now_play_url = self.get_play_url()
 
-    def read_from_response(self, bangumi_obj: Response):
-        bangumi_obj = bangumi_obj.json()
-        self.title = bangumi_obj["result"]["media"]["title"]
-        self.media_id = bangumi_obj["result"]["media"]["media_id"]
-        self.now_ep = bangumi_obj["result"]["media"]["new_ep"]["index"]
-        self.now_ep_id = bangumi_obj["result"]["media"]["new_ep"]["id"]
-        self.now_ep_show = bangumi_obj["result"]["media"]["new_ep"]["index_show"]
-        self.cover = bangumi_obj["result"]["media"]["cover"]
-        self.share_url = bangumi_obj["result"]["media"]["share_url"]
+    async def read_from_response(self, season_obj: aiohttp.ClientResponse):
+        season_obj = await season_obj.json()
+        self.title = season_obj["result"]["media"]["title"]
+        self.media_id = season_obj["result"]["media"]["media_id"]
+        self.now_ep = season_obj["result"]["media"]["new_ep"]["index"]
+        self.now_ep_id = season_obj["result"]["media"]["new_ep"]["id"]
+        self.now_ep_show = season_obj["result"]["media"]["new_ep"]["index_show"]
+        self.cover = season_obj["result"]["media"]["cover"]
+        self.share_url = season_obj["result"]["media"]["share_url"]
         self.now_play_url = self.get_play_url()
 
     def get_play_url(self):
-        return f"https://www.bilibili.com/bangumi/play/ep{self.now_ep_id}"
+        return f"https://www.bilibili.com/season/play/ep{self.now_ep_id}"
 
     def json(self):
         return {
@@ -83,12 +81,12 @@ class Bangumi:
         }
 
 
-class BangumiManager:
+class SeasonManager:
 
     def __init__(self):
-        self.bangumi_list: List[Bangumi] = []
+        self.season_list: List[Season] = []
         self.group_list: List[int] = []
-        self.file_path = DATA_PATH / "bangumi_sub.json"
+        self.file_path = DATA_PATH / "season_sub.json"
         self.read()
 
     def auto_save(func):
@@ -101,36 +99,36 @@ class BangumiManager:
         return wrapper
 
     @auto_save
-    def update(self, bangumi: Bangumi):
-        for item in self.bangumi_list:
-            if str(item.media_id) == str(bangumi.media_id):
-                self.bangumi_list[self.bangumi_list.index(item)] = bangumi
+    def update(self, season: Season):
+        for item in self.season_list:
+            if str(item.media_id) == str(season.media_id):
+                self.season_list[self.season_list.index(item)] = season
                 return
-        self.bangumi_list.append(bangumi)
+        self.season_list.append(season)
 
     @auto_save
-    def del_bangumi(self, bangumi: Bangumi | int) -> Bangumi | None:
-        if type(bangumi) is Bangumi:
-            if self.bangumi_list.count(bangumi) > 0:
-                self.bangumi_list.remove(bangumi)
+    def del_season(self, season: Season | int) -> Season | None:
+        if type(season) is Season:
+            if self.season_list.count(season) > 0:
+                self.season_list.remove(season)
                 self.save()
-                logger.info(f"BangumiManager 已删除订阅: {bangumi.title}({bangumi.media_id})")
-                return bangumi
+                logger.info(f"SeasonManager 已删除订阅: {season.title}({season.media_id})")
+                return season
             else:
                 return None
         else:
-            if len(self.bangumi_list) < bangumi - 1:
+            if len(self.season_list) < season - 1:
                 return None
             else:
-                del_result = self.bangumi_list.pop(bangumi)
-                logger.info(f"BangumiManager 已删除订阅: {del_result.title}({del_result.media_id})")
+                del_result = self.season_list.pop(season)
+                logger.info(f"SeasonManager 已删除订阅: {del_result.title}({del_result.media_id})")
                 return del_result
 
     @auto_save
     def add_group(self, group_id: int) -> Message:
         if group_id not in self.group_list:
             self.group_list.append(group_id)
-            logger.info(f"BangumiManager 新的群通知: {group_id}")
+            logger.info(f"SeasonManager 新的群通知: {group_id}")
             return Message(MessageSegment.text("本群添加通知成功"))
         else:
             return Message(MessageSegment.text("本群已添加通知"))
@@ -143,14 +141,14 @@ class BangumiManager:
             self.group_list.remove(group_id)
             return Message(MessageSegment.text("已移除本群通知"))
 
-    def get_bangumi_lst(self) -> None | List[Bangumi]:
-        if len(self.bangumi_list) == 0:
+    def get_season_lst(self) -> None | List[Season]:
+        if len(self.season_list) == 0:
             return None
         else:
-            return self.bangumi_list
+            return self.season_list
 
-    def get(self, media_id: int) -> None | Bangumi:
-        for item in self.bangumi_list:
+    def get(self, media_id: int) -> None | Season:
+        for item in self.season_list:
             if media_id == item.media_id:
                 return item
         return None
@@ -166,9 +164,9 @@ class BangumiManager:
             "sub_groups": self.group_list,
             "subs": {}
         }
-        for item in self.bangumi_list:
+        for item in self.season_list:
             result["subs"][str(item.media_id)] = item.json()
-        logger.info(f"BangumiManager 即将复写{str(self.file_path)}")
+        logger.info(f"SeasonManager 即将复写{str(self.file_path)}")
         json.dump(result, open(self.file_path, "w+", encoding="utf-8"), sort_keys=True, indent=4,
                   separators=(',', ':'),
                   ensure_ascii=False)
@@ -179,7 +177,7 @@ class BangumiManager:
                 "sub_groups": [],
                 "subs": {}
             }
-            if not os.path.exists(self.file_path):
+            if not os.path.exists(self.file_path.parent):
                 os.mkdir(self.file_path.parent)
             json.dump(result, open(self.file_path, "x", encoding="utf-8"), sort_keys=True, indent=4,
                       separators=(',', ':'),
@@ -187,63 +185,55 @@ class BangumiManager:
         try:
             sub_list = json.load(open(self.file_path, "r", encoding="utf-8"))
             for key in sub_list["subs"].keys():
-                self.bangumi_list.append(Bangumi(sub_list["subs"][key], key))
+                self.season_list.append(Season(sub_list["subs"][key], key))
             for group_item in sub_list["sub_groups"]:
                 self.group_list.append(group_item)
         except JSONDecodeError as e:
             logger.error(f"读取文件失败: {e}")
 
 
-bangumi_manager = BangumiManager()
-
-cookies = requests.get("https://bilibili.com").cookies
-cookies = "; ".join([f"{x}={cookies[x]}" for x in cookies.keys()])
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Referer": "https://www.bilibili.com/",
-    "Cookie": cookies
-}
+season_manager = SeasonManager()
 
 
 # 获取搜索结果
-async def get_search_results(keyword: str) -> List[BangumiHttp] | None:
-    async with AsyncClient() as client:
-
-        params = {"keyword": keyword, "search_type": "media_bangumi"}
-        client.headers = headers
-        client.params = params
-        if "result" in (search_result := (
-                await client.get("https://api.bilibili.com/x/web-interface/search/type")
-        ).json()["data"]):
-            matches = []
-            for item in search_result["result"]:
-                if '<em class="keyword">' and "</em>" not in item["title"]:
-                    continue
-                item["title"] = item["title"].replace('<em class="keyword">', "").replace("</em>", "")
-                matches.append(BangumiHttp.parse_obj(item))
-            return matches
-        else:
-            return None
+async def get_search_results(keyword: str) -> List[SeasonHttp] | None:
+    async with aiohttp.ClientSession() as session:
+        async with session.get("https://www.bilibili.com/"):
+            params = {"keyword": keyword, "search_type": "media_season"}
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
+            if "result" in (search_result := ((await (
+                    await session.get("https://api.bilibili.com/x/web-interface/search/type", params=params,
+                                      headers=headers)
+            ).json())["data"])):
+                matches = []
+                for item in search_result["result"]:
+                    if '<em class="keyword">' and "</em>" not in item["title"]:
+                        continue
+                    item["title"] = item["title"].replace('<em class="keyword">', "").replace("</em>", "")
+                    matches.append(SeasonHttp.parse_obj(item))
+                return matches
+            else:
+                return None
 
 
 # 添加番剧订阅
-async def add_bangumi_sub(bangumi_obj: Response) -> Message:
-    if bangumi_obj.json()["code"] == 0:
-        bangumi = Bangumi(bangumi_obj)
-        bangumi_manager.update(bangumi)
-        return Message(MessageSegment.image(await get_bytes(bangumi.cover)) + MessageSegment.text(
-            f"{bangumi.title}({bangumi.media_id}) 订阅成功\n当前集数: {bangumi.now_ep}"))
+async def add_season_sub(season_obj: aiohttp.ClientResponse) -> Message:
+    if (await season_obj.json())["code"] == 0:
+        season = Season(season_obj)
+        season_manager.update(season)
+        return Message(MessageSegment.image(await get_bytes(season.cover)) + MessageSegment.text(
+            f"{season.title}({season.media_id}) 订阅成功\n当前集数: {season.now_ep}"))
     else:
         return Message(MessageSegment.text("您输入的mid有误"))
 
 
 async def add_group_sub(group_id: int) -> Message:
-    return bangumi_manager.add_group(group_id)
+    return season_manager.add_group(group_id)
 
 
 # 删除番剧订阅(通过index) 从1开始
-async def del_bangumi_sub(input_index: int) -> Message:
-    result = bangumi_manager.del_bangumi(input_index)
+async def del_season_sub(input_index: int) -> Message:
+    result = season_manager.del_season(input_index)
     if result is None:
         return Message(MessageSegment.text("您输入的索引有误"))
     else:
@@ -251,8 +241,8 @@ async def del_bangumi_sub(input_index: int) -> Message:
 
 
 # 获取已订阅的番剧
-async def get_bangumi_lst() -> Message:
-    result = bangumi_manager.get_bangumi_lst()
+async def get_season_lst() -> Message:
+    result = season_manager.get_season_lst()
     if result is not None:
         content = f"\n".join(
             [
@@ -270,37 +260,46 @@ async def get_bangumi_lst() -> Message:
 
 
 # 获取番剧obj (Response)
-async def get_bangumi_obj(mid: str) -> Response:
-    async with AsyncClient() as client:
-        params = {"media_id": mid}
-        return await client.get("https://api.bilibili.com/pgc/review/user", headers=headers, params=params)
+async def get_season_obj(mid: str) -> aiohttp.ClientResponse:
+    async with aiohttp.ClientSession() as session:
+        async with session.get("https://www.bilibili.com/"):
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
+            return await session.get("https://api.bilibili.com/pgc/review/user", params={"media_id": mid},
+                                     headers=headers)
 
 
 # 获取http bytes
 async def get_bytes(url: str) -> bytes:
-    async with AsyncClient() as client:
-        return (await client.get(url, headers=headers)).content
+    async with aiohttp.ClientSession() as session:
+        async with session.get("https://www.bilibili.com/"):
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
+            return (await session.get(url, headers=headers)).content.total_bytes
 
 
-@scheduler.scheduled_job("cron", second=15, id="bangumi")
-async def get_bangumi_update():
-    if (bangumi_lst := bangumi_manager.get_bangumi_lst()) is not None:
-        for bangumi_item in bangumi_lst:
-            response_body = (await get_bangumi_obj(str(bangumi_item.media_id)))
-            if (new_ep := response_body.json()["result"]["media"]["new_ep"]["index"]) > bangumi_item.now_ep:
-                logger.info(f"{bangumi_item.title}({bangumi_item.media_id}) 更新至{new_ep}")
-                bangumi_manager.update(Bangumi(response_body))
+async def get_season(media_id: str) -> tuple[int, aiohttp.ClientResponse]:
+    res_body = (await get_season_obj(str(media_id)))
+    return int((await res_body.json())["result"]["media"]["new_ep"]["index"]), res_body
 
-                if (group_ids := bangumi_manager.get_group_lst()) is not None:
+
+@scheduler.scheduled_job("cron", second=15, id="season")
+async def get_season_update():
+    if (season_lst := season_manager.get_season_lst()) is not None:
+        for season_item in season_lst:
+            new_ep, response_boydy = await get_season(season_item.media_id)
+            if new_ep > season_item.now_ep:
+                logger.info(f"{season_item.title}({season_item.media_id}) 更新至{new_ep}")
+                season_manager.update(Season(await get_season_obj()))
+
+                if (group_ids := season_manager.get_group_lst()) is not None:
                     logger.info("即将广播群聊")
-                    img = MessageSegment.image(await get_bytes(bangumi_item.cover))
+                    img = MessageSegment.image(await get_bytes(season_item.cover))
                     text = MessageSegment.text(f"——————————————\n"
                                                "更新啦!!!\n"
-                                               f"{bangumi_item.share_url}"
-                                               f"{bangumi_item.title}({bangumi_item.media_id}) 已更新至第{new_ep}集!!\n"
+                                               f"{season_item.share_url}"
+                                               f"{season_item.title}({season_item.media_id}) 已更新至第{new_ep}集!!\n"
                                                "——————————————")
                     for group_id in group_ids:
                         await get_bot().send_msg(message=Message(img + text), group_id=group_id)
 
 
-scheduler.add_job(get_bangumi_update, "interval", seconds=15)
+scheduler.add_job(get_season_update, "interval", seconds=15)
