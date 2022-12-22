@@ -1,6 +1,6 @@
 import time
 from datetime import datetime
-from nonebot import on_command, logger
+from nonebot import on_command, logger, get_driver
 from nonebot.adapters.onebot.v11 import MessageEvent, Message, GroupMessageEvent
 from nonebot.internal.params import ArgStr, Arg
 from nonebot.params import CommandArg
@@ -13,6 +13,18 @@ add_sub = on_command("addsub", aliases={"添加订阅", "增加订阅"}, permiss
 del_sub = on_command("delsub", aliases={"删除订阅"}, permission=SUPERUSER)
 lst_sub = on_command("lstsub", aliases={"查看订阅"}, permission=SUPERUSER)
 pusher_add = on_command("pd", aliases={"添加本群通知"}, permission=SUPERUSER)
+pusher_remove = on_command("prm", aliases={"删除本群订阅"}, permission=SUPERUSER)
+driver = get_driver()
+
+
+@driver.on_startup
+async def _():
+    await create_request_manager()
+
+
+@pusher_remove.handle()
+async def _(evt: GroupMessageEvent):
+    await pusher_remove.finish(await del_group_sub(evt.group_id))
 
 
 @pusher_add.handle()
@@ -51,22 +63,22 @@ async def _(evt: MessageEvent, state: T_State, args: Message = CommandArg()):
 @add_sub.got("sub_user")
 @add_sub.got("id")
 async def _(id_: str = ArgStr("id"), sub_user: str = ArgStr("sub_user")):
-    bangumi_obj = await get_bangumi_obj(id_)
-    if bangumi_obj.status_code == 200:
-        await add_sub.finish(await add_bangumi_sub(bangumi_obj))
+    season_obj = await request_manager.get_season_obj(id_)
+    if season_obj.status == 200:
+        await add_sub.finish(await add_season_sub(season_obj))
     else:
         await add_sub.finish(MessageSegment.at(sub_user) + MessageSegment.text("您输入的mid有误"))
 
 
 @lst_sub.handle()
 async def _(evt: MessageEvent, args: Message = CommandArg()):
-    await lst_sub.finish(await get_bangumi_lst())
+    await lst_sub.finish(await get_season_lst())
 
 
 @del_sub.handle()
 async def _(evt: MessageEvent, args: Message = CommandArg()):
     index = args.extract_plain_text()
     if index.isdigit():
-        await lst_sub.finish(await del_bangumi_sub(int(index)))
+        await lst_sub.finish(await del_season_sub(int(index)))
     else:
         await lst_sub.finish(MessageSegment.at(evt.user_id) + MessageSegment.text("错误的索引值, 要求是正整数"))
