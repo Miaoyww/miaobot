@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from dataclasses import dataclass
@@ -192,28 +193,66 @@ class SeasonManager:
             logger.error(f"读取文件失败: {e}")
 
 
+class SeasonRequestManager:
+    def __init__(self):
+        self._session = None
+        asyncio.get_event_loop().run_until_complete(self.update_session())
+
+    async def update_session(self):
+        if self.session is not None:
+            await self.session.close()
+        jar = aiohttp.CookieJar()
+        self.session = aiohttp.ClientSession(cookie_jar=jar)
+        async with self.session.request("GET", "https://www.bilibili.com/") as response:
+            jar.update_cookies(response.cookies)
+
+    async def get_season_obj(self, mid: str) -> aiohttp.ClientResponse:
+        if self.session is None:
+            await self.update_session()
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
+        return await self.session.request("GET", "https://api.bilibili.com/pgc/review/user", params={"media_id": mid},
+                                          headers=headers)
+
+    async def get_bytes(self, url: str) -> bytes:
+        if self.session is None:
+            await self.update_session()
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
+        return (await self.session.request("GET", url, headers=headers)).content.total_bytes
+
+    async def get_season(self, media_id: str) -> tuple[int, aiohttp.ClientResponse]:
+        res_body = (await self.get_season_obj(str(media_id)))
+        return int((await res_body.json())["result"]["media"]["new_ep"]["index"]), res_body
+
+    @property
+    def session(self) -> aiohttp.ClientSession:
+        return self._session
+
+    @session.setter
+    def session(self, session: aiohttp.ClientSession):
+        self._session = session
+
+
 season_manager = SeasonManager()
+request_manager = SeasonRequestManager()
 
 
 # 获取搜索结果
 async def get_search_results(keyword: str) -> List[SeasonHttp] | None:
-    async with aiohttp.ClientSession() as session:
-        async with session.get("https://www.bilibili.com/"):
-            params = {"keyword": keyword, "search_type": "media_season"}
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
-            if "result" in (search_result := ((await (
-                    await session.get("https://api.bilibili.com/x/web-interface/search/type", params=params,
-                                      headers=headers)
-            ).json())["data"])):
-                matches = []
-                for item in search_result["result"]:
-                    if '<em class="keyword">' and "</em>" not in item["title"]:
-                        continue
-                    item["title"] = item["title"].replace('<em class="keyword">', "").replace("</em>", "")
-                    matches.append(SeasonHttp.parse_obj(item))
-                return matches
-            else:
-                return None
+    params = {"keyword": keyword, "search_type": "media_season"}
+    async with request_manager.session.request(
+            "GET",
+            "https://api.bilibili.com/x/web-interface/search/type",
+            params=params) as resp:
+        if "result" in (search_result := (await resp.json())):
+            matches = []
+            for item in search_result["result"]:
+                if '<em class="keyword">' and "</em>" not in item["title"]:
+                    continue
+                item["title"] = item["title"].replace('<em class="keyword">', "").replace("</em>", "")
+                matches.append(SeasonHttp.parse_obj(item))
+            return matches
+        else:
+            return None
 
 
 # 添加番剧订阅
@@ -221,7 +260,7 @@ async def add_season_sub(season_obj: aiohttp.ClientResponse) -> Message:
     if (await season_obj.json())["code"] == 0:
         season = Season(season_obj)
         season_manager.update(season)
-        return Message(MessageSegment.image(await get_bytes(season.cover)) + MessageSegment.text(
+        return Message(MessageSegment.image(await request_manager.get_bytes(season.cover)) + MessageSegment.text(
             f"{season.title}({season.media_id}) 订阅成功\n当前集数: {season.now_ep}"))
     else:
         return Message(MessageSegment.text("您输入的mid有误"))
@@ -260,39 +299,23 @@ async def get_season_lst() -> Message:
 
 
 # 获取番剧obj (Response)
-async def get_season_obj(mid: str) -> aiohttp.ClientResponse:
-    async with aiohttp.ClientSession() as session:
-        async with session.get("https://www.bilibili.com/"):
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
-            return await session.get("https://api.bilibili.com/pgc/review/user", params={"media_id": mid},
-                                     headers=headers)
 
 
 # 获取http bytes
-async def get_bytes(url: str) -> bytes:
-    async with aiohttp.ClientSession() as session:
-        async with session.get("https://www.bilibili.com/"):
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
-            return (await session.get(url, headers=headers)).content.total_bytes
-
-
-async def get_season(media_id: str) -> tuple[int, aiohttp.ClientResponse]:
-    res_body = (await get_season_obj(str(media_id)))
-    return int((await res_body.json())["result"]["media"]["new_ep"]["index"]), res_body
 
 
 @scheduler.scheduled_job("cron", second=15, id="season")
 async def get_season_update():
     if (season_lst := season_manager.get_season_lst()) is not None:
         for season_item in season_lst:
-            new_ep, response_boydy = await get_season(season_item.media_id)
+            new_ep, response_body = await request_manager.get_season(season_item.media_id)
             if new_ep > season_item.now_ep:
                 logger.info(f"{season_item.title}({season_item.media_id}) 更新至{new_ep}")
-                season_manager.update(Season(await get_season_obj()))
+                season_manager.update(Season(response_body))
 
                 if (group_ids := season_manager.get_group_lst()) is not None:
                     logger.info("即将广播群聊")
-                    img = MessageSegment.image(await get_bytes(season_item.cover))
+                    img = MessageSegment.image(await request_manager.get_bytes(season_item.cover))
                     text = MessageSegment.text(f"——————————————\n"
                                                "更新啦!!!\n"
                                                f"{season_item.share_url}"
