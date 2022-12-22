@@ -1,7 +1,7 @@
-import asyncio
 import json
 import os
 from dataclasses import dataclass
+from io import BytesIO
 from json import JSONDecodeError
 from configs.path_config import *
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
@@ -9,7 +9,6 @@ import aiohttp
 from pydantic import BaseModel
 from nonebot import require, logger, get_bot
 from typing import List
-import requests
 
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
@@ -39,14 +38,10 @@ class Season:
     cover: str = ""
     share_url: str = ""
 
-    def __init__(self, input_: dict | aiohttp.ClientResponse, media_id: str = ""):
-        if type(input_) is dict:
-            self.read_from_file(input_, media_id)
-        else:
-            self.read_from_response(input_)
+    def __init__(self):
+        pass
 
     def read_from_file(self, read_body: dict, media_id: str):
-
         self.title = read_body["title"]
         self.media_id = media_id
         self.now_ep = read_body["now_ep"]
@@ -56,8 +51,7 @@ class Season:
         self.share_url = read_body["share_url"]
         self.now_play_url = self.get_play_url()
 
-    async def read_from_response(self, season_obj: aiohttp.ClientResponse):
-        season_obj = await season_obj.json()
+    def read_from_response(self, season_obj: dict):
         self.title = season_obj["result"]["media"]["title"]
         self.media_id = season_obj["result"]["media"]["media_id"]
         self.now_ep = season_obj["result"]["media"]["new_ep"]["index"]
@@ -68,7 +62,7 @@ class Season:
         self.now_play_url = self.get_play_url()
 
     def get_play_url(self):
-        return f"https://www.bilibili.com/season/play/ep{self.now_ep_id}"
+        return f"https://www.bilibili.com/bangumi/play/ep{self.now_ep_id}"
 
     def json(self):
         return {
@@ -118,12 +112,10 @@ class SeasonManager:
             else:
                 return None
         else:
-            if len(self.season_list) < season - 1:
-                return None
-            else:
-                del_result = self.season_list.pop(season)
-                logger.info(f"SeasonManager 已删除订阅: {del_result.title}({del_result.media_id})")
-                return del_result
+            for item in self.season_list:
+                if item.media_id == str(season):
+                    self.season_list.remove(item)
+                    return item
 
     @auto_save
     def add_group(self, group_id: int) -> Message:
@@ -186,7 +178,9 @@ class SeasonManager:
         try:
             sub_list = json.load(open(self.file_path, "r", encoding="utf-8"))
             for key in sub_list["subs"].keys():
-                self.season_list.append(Season(sub_list["subs"][key], key))
+                season = Season()
+                season.read_from_file(sub_list["subs"][key], key)
+                self.season_list.append(season)
             for group_item in sub_list["sub_groups"]:
                 self.group_list.append(group_item)
         except JSONDecodeError as e:
@@ -196,7 +190,11 @@ class SeasonManager:
 class SeasonRequestManager:
     def __init__(self):
         self._session = None
-        asyncio.get_event_loop().run_until_complete(self.update_session())
+        self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                        "Referer": "https://www.bilibili.com"}
+
+    async def create(self):
+        await self.update_session()
 
     async def update_session(self):
         if self.session is not None:
@@ -209,15 +207,22 @@ class SeasonRequestManager:
     async def get_season_obj(self, mid: str) -> aiohttp.ClientResponse:
         if self.session is None:
             await self.update_session()
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
+
         return await self.session.request("GET", "https://api.bilibili.com/pgc/review/user", params={"media_id": mid},
-                                          headers=headers)
+                                          headers=self.headers)
 
     async def get_bytes(self, url: str) -> bytes:
         if self.session is None:
             await self.update_session()
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": "https://www.bilibili.com"}
-        return (await self.session.request("GET", url, headers=headers)).content.total_bytes
+        resp = await self.session.request("GET", url, headers=headers)
+        data = b''
+        while True:
+            chunk = await resp.content.read(1024)  # 读取 1024 字节的数据
+            if not chunk:
+                break
+            data += chunk
+        return data
 
     async def get_season(self, media_id: str) -> tuple[int, aiohttp.ClientResponse]:
         res_body = (await self.get_season_obj(str(media_id)))
@@ -236,14 +241,18 @@ season_manager = SeasonManager()
 request_manager = SeasonRequestManager()
 
 
+async def create_request_manager():
+    await request_manager.create()
+
+
 # 获取搜索结果
 async def get_search_results(keyword: str) -> List[SeasonHttp] | None:
-    params = {"keyword": keyword, "search_type": "media_season"}
+    params = {"keyword": keyword, "search_type": "media_bangumi"}
     async with request_manager.session.request(
             "GET",
             "https://api.bilibili.com/x/web-interface/search/type",
-            params=params) as resp:
-        if "result" in (search_result := (await resp.json())):
+            params=params, headers=request_manager.headers) as resp:
+        if "result" in (search_result := (await resp.json())["data"]):
             matches = []
             for item in search_result["result"]:
                 if '<em class="keyword">' and "</em>" not in item["title"]:
@@ -257,8 +266,9 @@ async def get_search_results(keyword: str) -> List[SeasonHttp] | None:
 
 # 添加番剧订阅
 async def add_season_sub(season_obj: aiohttp.ClientResponse) -> Message:
-    if (await season_obj.json())["code"] == 0:
-        season = Season(season_obj)
+    if (season_json_detail := (await season_obj.json()))["code"] == 0:
+        season = Season()
+        season.read_from_response(season_json_detail)
         season_manager.update(season)
         return Message(MessageSegment.image(await request_manager.get_bytes(season.cover)) + MessageSegment.text(
             f"{season.title}({season.media_id}) 订阅成功\n当前集数: {season.now_ep}"))
@@ -270,11 +280,15 @@ async def add_group_sub(group_id: int) -> Message:
     return season_manager.add_group(group_id)
 
 
+async def del_group_sub(group_id: int) -> Message:
+    return season_manager.del_group(group_id)
+
+
 # 删除番剧订阅(通过index) 从1开始
 async def del_season_sub(input_index: int) -> Message:
     result = season_manager.del_season(input_index)
     if result is None:
-        return Message(MessageSegment.text("您输入的索引有误"))
+        return Message(MessageSegment.text("您输入的mid有误,或此番剧未订阅"))
     else:
         return Message(MessageSegment.text(f"{result.title}({result.media_id}) 已移除订阅"))
 
@@ -304,14 +318,17 @@ async def get_season_lst() -> Message:
 # 获取http bytes
 
 
-@scheduler.scheduled_job("cron", second=15, id="season")
+@scheduler.scheduled_job("cron", second=50, id="season")
 async def get_season_update():
+    await request_manager.update_session()
     if (season_lst := season_manager.get_season_lst()) is not None:
         for season_item in season_lst:
             new_ep, response_body = await request_manager.get_season(season_item.media_id)
-            if new_ep > season_item.now_ep:
+            if new_ep > int(season_item.now_ep):
                 logger.info(f"{season_item.title}({season_item.media_id}) 更新至{new_ep}")
-                season_manager.update(Season(response_body))
+                season = Season()
+                season.read_from_response(await response_body.json())
+                season_manager.update(season)
 
                 if (group_ids := season_manager.get_group_lst()) is not None:
                     logger.info("即将广播群聊")
@@ -325,4 +342,4 @@ async def get_season_update():
                         await get_bot().send_msg(message=Message(img + text), group_id=group_id)
 
 
-scheduler.add_job(get_season_update, "interval", seconds=15)
+scheduler.add_job(get_season_update, "interval", seconds=50)

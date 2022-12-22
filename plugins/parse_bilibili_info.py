@@ -102,7 +102,7 @@ async def _handle(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg(
            f"————标题———— \n{video_info['title']}\n" \
            f"————UP主———— \n{video_info['owner']} ({video_info['upload_time']}上传 -时长: {video_info['duration']})\n" \
            f"————信息———— \n{detail_text}\n" \
-           f"————简介———— \n{video_info['desc']}" if video_info['desc'] != "" else None
+           f"————简介———— \n{video_info['desc'] if video_info['desc'] != '' else '来自半夏的消息——暂无简介哦~'}"
 
     image_message = MessageSegment.image(img_data)
     text_message = MessageSegment.text(text)
